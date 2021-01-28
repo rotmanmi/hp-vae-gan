@@ -4,6 +4,7 @@ import torch.nn as nn
 import numpy as np
 import copy
 import utils
+import sys
 
 
 def conv_weights_init_ones(m):
@@ -112,59 +113,6 @@ class Encode2DVAE(nn.Module):
         return mu, logvar
 
 
-class Encode2DVAE_nb(nn.Module):
-    def __init__(self, opt, out_dim=None, num_blocks=2):
-        super(Encode2DVAE_nb, self).__init__()
-
-        if out_dim is None:
-            output_dim = opt.nfc
-        else:
-            assert type(out_dim) is int
-            output_dim = out_dim
-
-        self.features = FeatureExtractor(opt.nc_im, opt.nfc, opt.ker_size, opt.ker_size // 2, 1, num_blocks=num_blocks)
-        self.mu = nn.Sequential(
-            ConvBlock2D(opt.nfc, output_dim, opt.ker_size, opt.ker_size // 2, 1, bn=False, act=None),
-            nn.AdaptiveAvgPool2d(1)
-        )
-        self.logvar = nn.Sequential(
-            ConvBlock2D(opt.nfc, output_dim, opt.ker_size, opt.ker_size // 2, 1, bn=False, act=None),
-            nn.AdaptiveAvgPool2d(1)
-        )
-        self.bern = ConvBlock2D(opt.nfc, 1, opt.ker_size, opt.ker_size // 2, 1, bn=False, act=None)
-
-    def forward(self, x):
-        features = self.features(x)
-        bern = torch.sigmoid(self.bern(features))
-        features = bern * features
-        mu = self.mu(features)
-        logvar = self.logvar(features)
-
-        return mu, logvar, bern
-
-
-class Encode3DVAE1x1(nn.Module):
-    def __init__(self, opt, out_dim=None):
-        super(Encode3DVAE1x1, self).__init__()
-
-        if out_dim is None:
-            output_dim = opt.nfc
-        else:
-            assert type(out_dim) is int
-            output_dim = out_dim
-
-        self.features = FeatureExtractor(opt.nc_im, opt.nfc, 1, 0, 1, num_blocks=2)
-        self.mu = ConvBlock2D(opt.nfc, output_dim, 1, 0, 1, bn=False, act=None)
-        self.logvar = ConvBlock2D(opt.nfc, output_dim, 1, 0, 1, bn=False, act=None)
-
-    def forward(self, x):
-        features = self.features(x)
-        mu = self.mu(features)
-        logvar = self.logvar(features)
-
-        return mu, logvar
-
-
 class WDiscriminator2D(nn.Module):
     def __init__(self, opt):
         super(WDiscriminator2D, self).__init__()
@@ -234,6 +182,8 @@ class GeneratorHPVAEGAN(nn.Module):
         if noise_init is None:
             mu, logvar = self.encode(video)
             z_vae = reparameterize(mu, logvar, self.training)
+            normed_z_vae = z_vae / ((z_vae ** 2).sum() + sys.float_info.epsilon)
+            _, s, _ = torch.svd(normed_z_vae.flatten(2))
         else:
             z_vae = noise_init
 
@@ -245,92 +195,13 @@ class GeneratorHPVAEGAN(nn.Module):
             x_prev_out = self.refinement_layers(0, vae_out, noise_amp, mode)
 
         if noise_init is None:
-            return x_prev_out, vae_out, (mu, logvar)
+            return x_prev_out, vae_out, (mu, logvar, s)
         else:
             return x_prev_out, vae_out
 
     def refinement_layers(self, start_idx, x_prev_out, noise_amp, mode):
         for idx, block in enumerate(self.body[start_idx:], start_idx):
             if self.opt.vae_levels == idx + 1 and not self.opt.train_all:
-                x_prev_out.detach_()
-
-            # Upscale
-            x_prev_out_up = utils.upscale_2d(x_prev_out, idx + 1, self.opt)
-
-            # Add noise if "random" sampling, else, add no noise is "reconstruction" mode
-            if mode == 'rand':
-                noise = utils.generate_noise(ref=x_prev_out_up)
-                x_prev = block(x_prev_out_up + noise * noise_amp[idx + 1])
-            else:
-                x_prev = block(x_prev_out_up)
-
-            x_prev_out = torch.tanh(x_prev + x_prev_out_up)
-
-        return x_prev_out
-
-
-class GeneratorVAE_nb(nn.Module):
-    def __init__(self, opt):
-        super(GeneratorVAE_nb, self).__init__()
-
-        self.opt = opt
-        N = int(opt.nfc)
-        self.N = N
-
-        self.encode = Encode2DVAE_nb(opt, out_dim=opt.latent_dim, num_blocks=opt.enc_blocks)
-        self.decoder = nn.Sequential()
-
-        # Normal Decoder
-        self.decoder.add_module('head', ConvBlock2D(opt.latent_dim, N, opt.ker_size, opt.padd_size, stride=1))
-        for i in range(opt.num_layer):
-            block = ConvBlock2D(N, N, opt.ker_size, opt.padd_size, stride=1)
-            self.decoder.add_module('block%d' % (i), block)
-        self.decoder.add_module('tail', nn.Conv2d(N, opt.nc_im, opt.ker_size, 1, opt.ker_size // 2))
-
-        self.body = torch.nn.ModuleList([])
-
-    def init_next_stage(self):
-        if len(self.body) == 0:
-            _first_stage = nn.Sequential()
-            _first_stage.add_module('head',
-                                    ConvBlock2D(self.opt.nc_im, self.N, self.opt.ker_size, self.opt.padd_size,
-                                                stride=1))
-            for i in range(self.opt.num_layer):
-                block = ConvBlock2D(self.N, self.N, self.opt.ker_size, self.opt.padd_size, stride=1)
-                _first_stage.add_module('block%d' % (i), block)
-            _first_stage.add_module('tail',
-                                    nn.Conv2d(self.N, self.opt.nc_im, self.opt.ker_size, 1, self.opt.ker_size // 2))
-            self.body.append(_first_stage)
-        else:
-            self.body.append(copy.deepcopy(self.body[-1]))
-
-    def forward(self, video, noise_amp, noise_init_norm=None, noise_init_bern=None, sample_init=None, mode='rand'):
-        if sample_init is not None:
-            assert len(self.body) > sample_init[0], "Strating index must be lower than # of body blocks"
-
-        if noise_init_norm is None:
-            mu, logvar, bern = self.encode(video)
-            z_vae_norm = reparameterize(mu, logvar, self.training)
-            z_vae_bern = reparameterize_bern(bern, self.training)
-        else:
-            z_vae_norm = noise_init_norm
-            z_vae_bern = noise_init_bern
-
-        vae_out = torch.tanh(self.decoder(z_vae_norm * z_vae_bern))
-
-        if sample_init is not None:
-            x_prev_out = self.refinement_layers(sample_init[0], sample_init[1], noise_amp, mode)
-        else:
-            x_prev_out = self.refinement_layers(0, vae_out, noise_amp, mode)
-
-        if noise_init_norm is None:
-            return x_prev_out, vae_out, (mu, logvar, bern)
-        else:
-            return x_prev_out, vae_out
-
-    def refinement_layers(self, start_idx, x_prev_out, noise_amp, mode):
-        for idx, block in enumerate(self.body[start_idx:], start_idx):
-            if self.opt.vae_levels == idx + 1:
                 x_prev_out.detach_()
 
             # Upscale

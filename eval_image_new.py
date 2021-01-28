@@ -69,33 +69,15 @@ def eval(opt, netG):
             opt.scale_idx + 1, opt.stop_scale + 1,
             iteration + 1, opt.niter,
         ))
-        G_curr.eval()
         import numpy as np
-        import sys
         with torch.no_grad():
             fake_var = []
             fake_vae_var = []
             for _ in range(opt.num_samples):
                 noise_init = utils.generate_noise(ref=noise_init)
                 channel_idxs = np.random.choice(np.arange(0, 128), 127, replace=False)
-                # U = torch.zeros(1, 128, 5).normal_(0, 1).to(noise_init.device)
-                U = torch.zeros(1, 128, 5).to(noise_init.device)
-                U.normal_(0, 1.1)
-                U[:, :120] = 0
-                V = torch.zeros(1, 5, 22, 33).to(noise_init.device)
-                V[:, :, 8:15, 20:22] = 1
-                V[:, :, 4:10, 8:10] = 1
-                V = V.flatten(2)
-                UV = torch.bmm(U, V).view(1, 128, 22, 33)
-                # noise_init[:] = 0
-                # noise_init[:, :, 5:11, 16:18] = _
-                # noise_init[:, 108, 0:4, 0:4] = 100
-                # noise_init[:, 21, _:_ + 1, 16:19] = 0.01
-                # noise_init[:, :, 3:11, 16:18] = -10 / opt.num_samples
-
-                # normed_z_vae = z_vae / ((z_vae ** 2).sum() + sys.float_info.epsilon)
-                # noise_init = noise_init / ((noise_init ** 2).sum() + sys.float_info.epsilon)
-                noise_init = UV
+                noise_init[:] = 0
+                noise_init[:, _:_ + 1, 8:11, 16:20] = 5
                 fake, fake_vae = G_curr(noise_init, opt.Noise_Amps, noise_init=noise_init, mode="rand")
                 fake_var.append(fake)
                 fake_vae_var.append(fake_vae)
@@ -119,7 +101,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--exp-dir', required=True, help="Experiment directory")
-    parser.add_argument('--num-samples', type=int, default=5, help='number of samples to generate')
+    parser.add_argument('--num-samples', type=int, default=100, help='number of samples to generate')
     parser.add_argument('--netG', default='netG.pth', help="path to netG (to continue training)")
     parser.add_argument('--niter', type=int, default=1, help='number of epochs')
     parser.add_argument('--batch-size', type=int, default=1)
@@ -209,7 +191,6 @@ if __name__ == '__main__':
         for _ in range(opt.scale_idx):
             netG.init_next_stage()
         netG.load_state_dict(checkpoint['state_dict'])
-        netG= netG.cuda()
         # NoiseAmp
         opt.Noise_Amps = torch.load(os.path.join(opt.resume_dir, 'Noise_Amps.pth'))['data']
 

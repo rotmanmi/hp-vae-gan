@@ -54,7 +54,9 @@ Common training options:
 ## Training Image
 For training a single video, use the following command for example:
 
-```CUDA_VISIBLE_DEVICES=0 python train_image.py --image-path data/imgs/air_balloons.jpg --vae-levels 3 --checkname myimagetest --visualize```
+```CUDA_VISIBLE_DEVICES=0 python train_image.py --image-path data/imgs/air_balloons.jpg --vae-levels 3 --checkname myimagetest --visualize
+CUDA_VISIBLE_DEVICES=0 python train_image_new.py --image-path data/imgs/air_balloons.jpg --vae-levels 3 --checkname myimagetest --visualize
+```
 
 ## Training baselines for video
 For training a single video using SinGan re-implementation, use the following command:
@@ -66,6 +68,8 @@ Use ```eval_*.py``` to generate samples from an "experiment" folder created duri
 The code uses Glob package for multiple experiments evaluation, for example, the following line will generate 100 video samples for all trained movies:
 ```shell
 python eval_video.py --num-samples 100 --exp-dir run/**/*/experiment_0
+
+python eval_image.py  --exp-dir run/trump/trumptest/experiment_0
 ```
 results are saved under ```run/**/*/experiment_0/eval```
 
