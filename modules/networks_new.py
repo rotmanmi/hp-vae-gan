@@ -63,7 +63,7 @@ class ConvBlock2D(nn.Sequential):
 
 
 class ConvBlock2DSN(nn.Sequential):
-    def __init__(self, in_channel, out_channel, ker_size, padding, stride, bn=True, act='lrelu'):
+    def __init__(self, in_channel, out_channel, ker_size, padding, stride, bn=False, act='lrelu'):
         super(ConvBlock2DSN, self).__init__()
         if bn:
             self.add_module('conv', nn.utils.spectral_norm(nn.Conv2d(in_channel, out_channel, kernel_size=ker_size,

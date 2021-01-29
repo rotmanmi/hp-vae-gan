@@ -11,8 +11,10 @@ import colorama
 import torch
 from torch.utils.data import DataLoader
 
-from modules import networks_2d
+from modules import networks_new
 from datasets.image import SingleImageDataset
+
+
 
 clear = colorama.Style.RESET_ALL
 blue = colorama.Fore.CYAN + colorama.Style.BRIGHT
@@ -79,14 +81,16 @@ def eval(opt, netG):
                 noise_init = utils.generate_noise(ref=noise_init)
                 channel_idxs = np.random.choice(np.arange(0, 128), 127, replace=False)
                 # U = torch.zeros(1, 128, 5).normal_(0, 1).to(noise_init.device)
-                U = torch.zeros(1, 128, 5).to(noise_init.device)
-                U.normal_(0, 1.1)
-                U[:, :120] = 0
-                V = torch.zeros(1, 5, 22, 33).to(noise_init.device)
-                V[:, :, 8:15, 20:22] = 1
-                V[:, :, 4:10, 8:10] = 1
+                U = torch.zeros(1, 128, 1).to(noise_init.device)
+                U[:, _] = 4
+                # U[:, :120] =
+                V = torch.zeros(1, 1, 22, 33).to(noise_init.device)
+                # V.bernoulli_(p=0.01)
+                V[:, :, 1:4, 20:32] = 1
+                # V[:, :, 4:10, 8:10] = 1
                 V = V.flatten(2)
                 UV = torch.bmm(U, V).view(1, 128, 22, 33)
+                UV = (UV - UV.mean()) / UV.std()
                 # noise_init[:] = 0
                 # noise_init[:, :, 5:11, 16:18] = _
                 # noise_init[:, 108, 0:4, 0:4] = 100
@@ -110,7 +114,7 @@ def eval(opt, netG):
 
     random_samples = torch.cat(random_samples, dim=0)
     from torchvision.utils import save_image
-    save_image(random_samples, 'test.png')
+    save_image(random_samples, 'test.png', normalize=True)
     torch.save(random_samples, os.path.join(opt.saver.eval_dir, "random_samples.pth"))
     epoch_iterator.close()
 
@@ -119,7 +123,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--exp-dir', required=True, help="Experiment directory")
-    parser.add_argument('--num-samples', type=int, default=5, help='number of samples to generate')
+    parser.add_argument('--num-samples', type=int, default=50, help='number of samples to generate')
     parser.add_argument('--netG', default='netG.pth', help="path to netG (to continue training)")
     parser.add_argument('--niter', type=int, default=1, help='number of epochs')
     parser.add_argument('--batch-size', type=int, default=1)
@@ -197,8 +201,8 @@ if __name__ == '__main__':
         opt.data_loader = data_loader
 
         # Current networks
-        assert hasattr(networks_2d, opt.generator)
-        netG = getattr(networks_2d, opt.generator)(opt).to(opt.device)
+        assert hasattr(networks_new, opt.generator)
+        netG = getattr(networks_new, opt.generator)(opt).to(opt.device)
 
         if not os.path.isfile(opt.netG):
             raise RuntimeError("=> no <G> checkpoint found at '{}'".format(opt.netG))
@@ -209,7 +213,7 @@ if __name__ == '__main__':
         for _ in range(opt.scale_idx):
             netG.init_next_stage()
         netG.load_state_dict(checkpoint['state_dict'])
-        netG= netG.cuda()
+        netG = netG.cuda()
         # NoiseAmp
         opt.Noise_Amps = torch.load(os.path.join(opt.resume_dir, 'Noise_Amps.pth'))['data']
 
